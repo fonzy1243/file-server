@@ -1,0 +1,14 @@
+[
+{
+  "directory": "C:/Users/Fonzy/file-server/build",
+  "command": "C:\\PROGRA~1\\LLVM\\bin\\CLANG_~1.EXE -DASIO_STANDALONE -D_WIN32_WINNT=0x0601 -IC:/Users/Fonzy/file-server/include -O0 -std=gnu++20 -D_DEBUG -D_DLL -D_MT -Xclang --dependent-lib=msvcrtd -g -Xclang -gcodeview @CMakeFiles\\client.dir\\src\\client\\client.cpp.obj.modmap -o CMakeFiles\\client.dir\\src\\client\\client.cpp.obj -c C:\\Users\\Fonzy\\file-server\\src\\client\\client.cpp",
+  "file": "C:\\Users\\Fonzy\\file-server\\src\\client\\client.cpp",
+  "output": "CMakeFiles\\client.dir\\src\\client\\client.cpp.obj"
+},
+{
+  "directory": "C:/Users/Fonzy/file-server/build",
+  "command": "C:\\PROGRA~1\\LLVM\\bin\\CLANG_~1.EXE -DASIO_STANDALONE -D_WIN32_WINNT=0x0601 -IC:/Users/Fonzy/file-server/include -O0 -std=gnu++20 -D_DEBUG -D_DLL -D_MT -Xclang --dependent-lib=msvcrtd -g -Xclang -gcodeview @CMakeFiles\\server.dir\\src\\server\\server.cpp.obj.modmap -o CMakeFiles\\server.dir\\src\\server\\server.cpp.obj -c C:\\Users\\Fonzy\\file-server\\src\\server\\server.cpp",
+  "file": "C:\\Users\\Fonzy\\file-server\\src\\server\\server.cpp",
+  "output": "CMakeFiles\\server.dir\\src\\server\\server.cpp.obj"
+}
+]

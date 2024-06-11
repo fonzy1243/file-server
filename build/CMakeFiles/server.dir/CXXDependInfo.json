@@ -1,0 +1,21 @@
+{
+	"bmi-installation" : null,
+	"compiler-frontend-variant" : "GNU",
+	"compiler-id" : "Clang",
+	"compiler-simulate-id" : "MSVC",
+	"config" : "Debug",
+	"cxx-modules" : {},
+	"dir-cur-bld" : "C:/Users/Fonzy/file-server/build",
+	"dir-cur-src" : "C:/Users/Fonzy/file-server",
+	"dir-top-bld" : "C:/Users/Fonzy/file-server/build",
+	"dir-top-src" : "C:/Users/Fonzy/file-server",
+	"exports" : [],
+	"forward-modules-from-target-dirs" : [],
+	"include-dirs" : 
+	[
+		"C:\\Users\\Fonzy\\file-server\\include"
+	],
+	"language" : "CXX",
+	"linked-target-dirs" : [],
+	"module-dir" : "C:/Users/Fonzy/file-server/build/CMakeFiles/server.dir"
+}
