@@ -25,7 +25,7 @@ class Client:
     def register(self, handle):
         try:
             self.sck.send(f"REGISTER {handle}".encode())
-            resp = self.sck.recv(1024).decode
+            resp = self.sck.recv(1024).decode()
             if resp != "":
                 return
         except:
@@ -52,12 +52,9 @@ class Client:
         try:
             self.sck.send(f"SEND {fname}".encode())
 
-            f_size = os.path.getsize(fname)
-            self.sck.sendall(struct.pack("<Q", f_size))
-
-            with open(fname, "rb") as f:
-                while read := f.read(1024):
-                    self.sck.sendall(read)
+            with open(f"/s_files/{fname}", "rb") as f:
+                self.sck.sendall(str(os.path.getsize(fname)).encode('utf8'))
+                self.sck.sendfile(f)
         except FileNotFoundError:
             pass
         except socket.error as e:
