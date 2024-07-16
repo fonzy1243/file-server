@@ -1,4 +1,5 @@
 import socket
+import os
 import sys
 import threading
 
@@ -8,6 +9,7 @@ class Server:
         self.port = port
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.clients = []
+        self.handles = {}
 
     def start(self):
         try:
@@ -37,8 +39,33 @@ class Server:
                     break
                 
                 # Process req
-                if data.startswith(""):
-                    pass
+                if data.startswith("REGISTER"):
+                    handle = data.split()[1]
+                    if handle in self.handles.values():
+                        c_socket.sendall("TAKEN".encode())
+                        break
+                    self.handles[c_socket] = handle
+                    c_socket.sendall("".encode())
+
+                elif data.startswith("DIR"):
+                    path = "/s_files"
+                    file_list = os.listdir(path)
+                    file_list_str = "\n".join(file_list)
+                    c_socket.sendall(file_list_str.encode())
+
+                elif data.startswith("GET"):
+                    fname = data.split()[1]
+                    with open(f"/s_files/{fname}", "rb") as f:
+                        c_socket.sendall(str(os.path.getsize(f"/s_files/{fname}")).encode('utf8'))
+                        c_socket.sendfile(f)
+
+                elif data.startswith("SEND"):
+                    fname = data.split()[1]
+                    fsize = int(c_socket.recv(1024).decode())
+                    rec_file = c_socket.recv(fsize)
+                    with open(f"/s_files/{fname}", "wb") as f:
+                        f.write(rec_file)
+
         except:
             pass
 
