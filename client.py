@@ -1,4 +1,6 @@
 import socket
+import struct
+import os
 
 class Client:
     def __init__(self) -> None:
@@ -22,8 +24,7 @@ class Client:
 
     def register(self, handle):
         try:
-            msg = "REGISTER " + handle
-            self.sck.send(msg.encode())
+            self.sck.send(f"REGISTER {handle}".encode())
             resp = self.sck.recv(1024).decode
             if resp != "":
                 return
@@ -33,13 +34,34 @@ class Client:
             self.handle = handle
 
     def get_dir(self):
-        pass
+        try:
+            self.sck.send("DIR".encode())
+            resp = self.sck.recv(1024).decode()
+            print("Directory:\n")
+            print(resp)
+        except:
+            pass
 
     def get_file(self, fname):
-        pass
+        try:
+            self.sck.send(f"GET {fname}".encode())
+        except:
+            pass
 
     def send_file(self, fname):
-        pass
+        try:
+            self.sck.send(f"SEND {fname}".encode())
+
+            f_size = os.path.getsize(fname)
+            self.sck.sendall(struct.pack("<Q", f_size))
+
+            with open(fname, "rb") as f:
+                while read := f.read(1024):
+                    self.sck.sendall(read)
+        except FileNotFoundError:
+            pass
+        except socket.error as e:
+            pass
 
     def get_help(self):
         pass
