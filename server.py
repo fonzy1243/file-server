@@ -10,26 +10,40 @@ class Server:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.clients = []
         self.handles = {}
+        self.threads = []
+        self.running = False
 
     def start(self):
         try:
             self.socket.bind((self.host, self.port))
             self.socket.listen()
             print(f"Server listening on {self.host}:{self.port}")
+            self.running = True
 
-            while True:
-                c_socket, c_address = self.socket.accept()
-                print(f"New connection from {c_address}")
-                c_thread = threading.Thread(target=self.handle_client, args=(c_socket,))
-                c_thread.start()
-                self.clients.append(c_socket)
-                pass
+            while self.running:
+                try:
+                    self.socket.settimeout(1.0)
+                    c_socket, c_address = self.socket.accept()
+                    print(f"New connection from {c_address}")
+                    c_thread = threading.Thread(target=self.handle_client, args=(c_socket,))
+                    c_thread.start()
+                    self.clients.append(c_socket)
+                    self.threads.append(c_thread)
+                except socket.timeout:
+                    continue
+                except Exception as e:
+                    print(f"Error: {e}")
         except KeyboardInterrupt:
             print("Shutting down server...")
+        except ConnectionResetError:
+            print("Error: Connection forcefully terminated by client.")
         except socket.error as e:
             print(f"Error: Error starting server {e}")
         finally:
             self.socket.close()
+            for t in self.threads:
+                t.join()
+            print("Server closed.")
 
     def handle_client(self, c_socket: socket.socket):
         try:
@@ -66,11 +80,15 @@ class Server:
                     with open(f"/s_files/{fname}", "wb") as f:
                         f.write(rec_file)
 
-        except:
-            pass
+        except KeyboardInterrupt:
+            print("Test") 
+        except ConnectionResetError:
+            print("Error: Connection forcefully terminated by client.")
+        except Exception as e:
+            print(f"Error: {e}")
 
 def main():
-    port = sys.argv[0]
+    port = int(sys.argv[1])
     server = Server(port)
     server.start()
 
