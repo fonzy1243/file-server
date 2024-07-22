@@ -2,15 +2,30 @@ import socket
 import sys
 import os
 
+COMMANDS = [
+
+]
+
+HANDLE_REQUIRED = [
+    "/store", "/dir", "/get"
+]
+
 class Client:
     def __init__(self) -> None:
-        self.sck = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sck: socket.socket
         self.handle = None
+        self.connected = False
 
     def get_command(self, cmd: str):
         try:
             cmd_words = cmd.strip().split()
             command = cmd_words[0]
+
+            if command != "/join" and self.connected == False:
+                raise Exception("You are not connected to the server.")
+
+            if command in HANDLE_REQUIRED and self.handle is None:
+                raise Exception("You must be registered to use this command.")
 
             if command == "/join" and len(cmd_words) == 3:
                 addr = cmd_words[1]
@@ -31,14 +46,14 @@ class Client:
                 self.get_file(fname)
             elif command == "/?" and len(cmd_words) == 1:
                 self.get_help()
-            else:
-                print("Error: Invalid command.")
         except Exception as e:
             print(f"Error: {e}")
 
     def connect(self, addr, port):
         try:
+            self.sck = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sck.connect((addr, port))
+            self.connected = True
             print(f"Connected to server at {addr}:{port}.")
         except:
             print("Error: Connection to server failed. Please check IP address and port number.")
@@ -46,18 +61,22 @@ class Client:
     def disconnect(self):
         try:
             self.sck.close()
-        except:
-            print("Error: Failed to disconnect. Please check connection to server.")
+            self.connected = False
+        except Exception as e:
+            print(f"Error: {e}")
 
     def register(self, handle):
         try:
+            if self.handle is not None:
+                raise Exception("already registered")
+
             self.sck.send(f"REGISTER {handle}".encode())
             resp = self.sck.recv(1024).decode()
-            if resp != "":
-                raise Exception("Error: Handle already taken.")
-        except:
-            print("Error: Failed to register.") 
-        finally:
+            if resp == "TAKEN":
+                raise Exception("handle already taken")
+        except Exception as e:
+            print(f"Error: Failed to register, {e}.") 
+        else:
             self.handle = handle
             if not os.path.exists(self.handle):
                 os.mkdir(self.handle)
@@ -65,32 +84,53 @@ class Client:
     def get_dir(self):
         try:
             self.sck.send("DIR".encode())
-            resp = self.sck.recv(1024).decode()
-            print("Directory:\n")
-            print(resp)
-        except:
-            pass
+            resp = self.sck.recv(4096).decode()
+            if not resp.startswith("Error"):
+                print("Directory:")
+                print(resp)
+            else:
+                raise Exception(resp)
+        except Exception as e:
+            print(f"Error: Failed to display server dir, {e}")
 
     def get_file(self, fname):
         try:
+            fpath = f"{self.handle}/{fname}"
             self.sck.send(f"GET {fname}".encode())
-        except:
-            pass
+            resp = self.sck.recv(4096).decode()
+            if resp.startswith("Error"):
+                raise Exception(f"Server {resp}")
+            fsize = int(resp)
+            with open(fpath, "wb") as f:
+                rec_file = self.sck.recv(fsize)
+                f.write(rec_file)
+        except Exception as e:
+            print(e)
 
     def send_file(self, fname):
         try:
+            fpath = f"{self.handle}/{fname}"
             self.sck.send(f"SEND {fname}".encode())
 
-            with open(f"/{self.handle}/{fname}", "rb") as f:
-                self.sck.sendall(str(os.path.getsize(fname)).encode('utf8'))
+            with open(fpath, "rb") as f:
+                self.sck.sendall(str(os.path.getsize(fpath)).encode('utf8'))
                 self.sck.sendfile(f)
         except FileNotFoundError:
-            pass
-        except socket.error as e:
-            pass
+            print("Error: File not found.")
+        except Exception as e:
+            print(f"Error: {e}")
 
     def get_help(self):
-        pass
+        print("""
+        Commands:
+        /join <address> <port> - Connect to server
+        /leave - Disconnect from server
+        /register <handle> - Register with a handle
+        /store <filename> - Store a file on the server
+        /dir - List files from the server
+        /get <filename> - Get a file from the server
+        /? - Help message
+        """)
 
 def main():
     client = Client()
