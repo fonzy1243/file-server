@@ -1,3 +1,5 @@
+from typing import List
+
 import socket
 import os
 import sys
@@ -8,10 +10,11 @@ class Server:
         self.host = "127.0.0.1"
         self.port = port
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.clients = []
+        self.clients: List[socket.socket] = []
         self.handles = {}
         self.threads = []
         self.running = False
+        self.shutdown_even = threading.Event()
 
     def start(self):
         try:
@@ -24,13 +27,14 @@ class Server:
                 try:
                     self.socket.settimeout(1.0)
                     c_socket, c_address = self.socket.accept()
-                    print(f"New connection from {c_address}")
+                    print(f"New connection from {c_address[0]}:{c_address[1]}")
                     c_thread = threading.Thread(target=self.handle_client, args=(c_socket,))
                     c_thread.start()
                     self.clients.append(c_socket)
                     self.threads.append(c_thread)
                 except socket.timeout:
-                    continue
+                    if self.shutdown_even.is_set():
+                        self.running = False
                 except Exception as e:
                     print(f"Error: {e}")
         except KeyboardInterrupt:
@@ -40,10 +44,17 @@ class Server:
         except socket.error as e:
             print(f"Error: Error starting server {e}")
         finally:
-            self.socket.close()
-            for t in self.threads:
-                t.join()
-            print("Server closed.")
+            self.shutdown()
+
+    def shutdown(self):
+        self.shutdown_even.set()
+        self.running = False
+        for c in self.clients:
+            c.close()
+        for t in self.threads:
+            t.join()
+        self.socket.close()
+        print("Server closed.")
 
     def handle_client(self, c_socket: socket.socket):
         try:
@@ -57,33 +68,50 @@ class Server:
                     handle = data.split()[1]
                     if handle in self.handles.values():
                         c_socket.sendall("TAKEN".encode())
-                        break
-                    self.handles[c_socket] = handle
-                    c_socket.sendall("".encode())
+                    else:
+                        self.handles[c_socket] = handle
+                        c_socket.sendall(f"{handle}".encode())
 
                 elif data.startswith("DIR"):
-                    path = "/s_files"
-                    file_list = os.listdir(path)
-                    file_list_str = "\n".join(file_list)
-                    c_socket.sendall(file_list_str.encode())
+                    try:
+                        path = "s_files"
+                        file_list = os.listdir(path)
+                        if not file_list:
+                            c_socket.sendall("EMPTY".encode())
+                        else:
+                            file_list_str = "\n".join(file_list)
+                            c_socket.sendall(file_list_str.encode())
+                    except Exception as e:
+                        c_socket.sendall("{e}".encode())
 
                 elif data.startswith("GET"):
-                    fname = data.split()[1]
-                    with open(f"/s_files/{fname}", "rb") as f:
-                        c_socket.sendall(str(os.path.getsize(f"/s_files/{fname}")).encode('utf8'))
-                        c_socket.sendfile(f)
+                    try:
+                        fname = data.split()[1]
+                        fpath = f"s_files/{fname}"
+                        with open(fpath, "rb") as f:
+                            fsize = os.path.getsize(fpath)
+                            c_socket.sendall(str(fsize).encode('utf8'))
+                            c_socket.sendfile(f)
+                    except Exception as e:
+                        c_socket.sendall(f"Error: {e}".encode())
 
                 elif data.startswith("SEND"):
-                    fname = data.split()[1]
-                    fsize = int(c_socket.recv(1024).decode())
-                    rec_file = c_socket.recv(fsize)
-                    with open(f"/s_files/{fname}", "wb") as f:
-                        f.write(rec_file)
+                    try: 
+                        fname = data.split()[1]
+                        fpath = f"s_files/{fname}"
+                        fsize = int(c_socket.recv(1024).decode())
+                        rec_file = c_socket.recv(fsize)
+                        with open(fpath, "wb") as f:
+                            f.write(rec_file)
+                    except Exception as e:
+                        print(f"Error: {e}")
 
         except KeyboardInterrupt:
             print("Test") 
         except ConnectionResetError:
             print("Error: Connection forcefully terminated by client.")
+        except ConnectionAbortedError:
+            pass 
         except Exception as e:
             print(f"Error: {e}")
 
