@@ -4,6 +4,7 @@ import os
 import tkinter as tk
 from tkinter import scrolledtext, messagebox
 from datetime import datetime
+import time
 
 COMMANDS = [
     "/join <server_ip> <port> - Connect to the server",
@@ -13,6 +14,7 @@ COMMANDS = [
     "/dir - List files on the server",
     "/get <filename> - Download a file from the server",
     "/shutdown - Shutdown the server",
+    "/close - Close the client",
     "/? or /help - Display this command list"
 ]
 
@@ -44,6 +46,7 @@ class Client:
         self.send_button = tk.Button(self.root, text="Send", command=self.execute_command)
         self.send_button.grid(row=1, column=1, padx=10, pady=10)
 
+        self.root.protocol("WM_DELETE_WINDOW", self.close_client)  # Handle window close event
         self.root.mainloop()
 
     def execute_command(self, event=None):
@@ -56,6 +59,7 @@ class Client:
         self.output_area.insert(tk.END, message + "\n")
         self.output_area.yview(tk.END)
         self.output_area.config(state=tk.DISABLED)
+        print(message)  # Print message to the command line
 
     def get_command(self, cmd: str):
         try:
@@ -92,6 +96,8 @@ class Client:
                 self.get_file(fname)
             elif command == "/shutdown" and len(cmd_words) == 1:
                 self.shutdown_server()
+            elif command == "/close" and len(cmd_words) == 1:
+                self.close_client()
             else:
                 raise Exception("Error: Unknown command. Type /? or /help for the command list.")
         except Exception as e:
@@ -193,6 +199,17 @@ class Client:
         if last_handle:
             self.display_message(f"Welcome back, {last_handle}!")
             self.handle = last_handle
+
+    def close_client(self):
+        try:
+            self.display_message("Closing client. Goodbye!")
+            if self.connected:
+                self.disconnect()
+            print("Closing client. Goodbye!")  # Print message to the command line
+            time.sleep(2)  # Wait for  seconds before closing the window
+            self.root.destroy()  # Close the Tkinter window
+        except Exception as e:
+            self.display_message(f"Error: Could not close the client. {e}")
 
 def main():
     client = Client()
