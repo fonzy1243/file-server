@@ -1,5 +1,4 @@
-from typing import List
-
+from typing import List, Dict
 import socket
 import os
 import sys
@@ -11,10 +10,12 @@ class Server:
         self.port = port
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.clients: List[socket.socket] = []
-        self.handles = {}
+        self.handles: Dict[socket.socket, str] = {}
         self.threads = []
         self.running = False
-        self.shutdown_even = threading.Event()
+        self.shutdown_event = threading.Event()
+        self.server_directory = 's_files'
+        os.makedirs(self.server_directory, exist_ok=True)
 
     def start(self):
         try:
@@ -33,7 +34,7 @@ class Server:
                     self.clients.append(c_socket)
                     self.threads.append(c_thread)
                 except socket.timeout:
-                    if self.shutdown_even.is_set():
+                    if self.shutdown_event.is_set():
                         self.running = False
                 except Exception as e:
                     print(f"Error: {e}")
@@ -47,7 +48,7 @@ class Server:
             self.shutdown()
 
     def shutdown(self):
-        self.shutdown_even.set()
+        self.shutdown_event.set()
         self.running = False
         for c in self.clients:
             c.close()
@@ -59,64 +60,113 @@ class Server:
     def handle_client(self, c_socket: socket.socket):
         try:
             while True:
-                data = c_socket.recv(1024).decode()
-                if not data:
+                msg = c_socket.recv(1024).decode()
+                if not msg:
                     break
                 
-                # Process req
-                if data.startswith("REGISTER"):
-                    handle = data.split()[1]
-                    if handle in self.handles.values():
-                        c_socket.sendall("TAKEN".encode())
-                    else:
-                        self.handles[c_socket] = handle
-                        c_socket.sendall(f"{handle}".encode())
-
-                elif data.startswith("DIR"):
-                    try:
-                        path = "s_files"
-                        file_list = os.listdir(path)
-                        if not file_list:
-                            c_socket.sendall("EMPTY".encode())
-                        else:
-                            file_list_str = "\n".join(file_list)
-                            c_socket.sendall(file_list_str.encode())
-                    except Exception as e:
-                        c_socket.sendall("{e}".encode())
-
-                elif data.startswith("GET"):
-                    try:
-                        fname = data.split()[1]
-                        fpath = f"s_files/{fname}"
-                        with open(fpath, "rb") as f:
-                            fsize = os.path.getsize(fpath)
-                            c_socket.sendall(str(fsize).encode('utf8'))
-                            c_socket.sendfile(f)
-                    except Exception as e:
-                        c_socket.sendall(f"Error: {e}".encode())
-
-                elif data.startswith("SEND"):
-                    try: 
-                        fname = data.split()[1]
-                        fpath = f"s_files/{fname}"
-                        fsize = int(c_socket.recv(1024).decode())
-                        rec_file = c_socket.recv(fsize)
-                        with open(fpath, "wb") as f:
-                            f.write(rec_file)
-                    except Exception as e:
-                        print(f"Error: {e}")
-
-        except KeyboardInterrupt:
-            print("Test") 
-        except ConnectionResetError:
-            print("Error: Connection forcefully terminated by client.")
-        except ConnectionAbortedError:
-            pass 
+                print(f"Received message: {msg}")
+                self.process_command(c_socket, msg)
         except Exception as e:
             print(f"Error: {e}")
+        finally:
+            c_socket.close()
+
+    def process_command(self, c_socket: socket.socket, msg: str):
+        msg_parts = msg.split()
+        command = msg_parts[0]
+
+        if command == "/register" and len(msg_parts) == 2:
+            handle = msg_parts[1]
+            if handle in self.handles.values():
+                c_socket.sendall(f"Error: Handle {handle} already exists.".encode())
+            else:
+                self.handles[c_socket] = handle
+                user_directory = os.path.join(self.server_directory, handle)
+                os.makedirs(user_directory, exist_ok=True)
+                c_socket.sendall(f"Handle {handle} registered successfully.".encode())
+        elif command == "/store" and len(msg_parts) == 2:
+            filename = msg_parts[1]
+            self.receive_file(c_socket, filename)
+        elif command == "/dir":
+            self.send_directory_list(c_socket)
+        elif command == "/get" and len(msg_parts) == 2:
+            filename = msg_parts[1]
+            self.send_file(c_socket, filename)
+        elif command == "/leave":
+            c_socket.close()
+            self.clients.remove(c_socket)
+            self.handles.pop(c_socket, None)
+        elif command == "/shutdown":
+            if c_socket in self.handles:
+                self.shutdown()
+            else:
+                c_socket.sendall(f"Error: Unauthorized shutdown attempt.".encode())
+        elif command == "/?":
+            self.send_help(c_socket)
+        else:
+            c_socket.sendall(f"Unknown or invalid command: {command}".encode())
+
+    def receive_file(self, c_socket: socket.socket, filename: str):
+        filepath = os.path.join(self.server_directory, filename)
+        try:
+            with open(filepath, 'wb') as file:
+                while True:
+                    data = c_socket.recv(4096)
+                    if data == b"EOF":
+                        break
+                    if not data:
+                        break
+                    file.write(data)
+            handle = self.handles.get(c_socket, "Unknown")
+            c_socket.sendall(f"File {filename} received from {handle}.".encode())
+        except Exception as e:
+            c_socket.sendall(f"Error: {e}".encode())
+
+    def send_directory_list(self, c_socket: socket.socket):
+        try:
+            files = os.listdir(self.server_directory)
+            if files:
+                files_list = '\n'.join(files)
+            else:
+                files_list = "No files found."
+            c_socket.sendall(files_list.encode())
+        except Exception as e:
+            c_socket.sendall(f"Error: {e}".encode())
+
+    def send_file(self, c_socket: socket.socket, filename: str):
+        filepath = os.path.join(self.server_directory, filename)
+        try:
+            with open(filepath, 'rb') as file:
+                file_size = os.path.getsize(filepath)
+                c_socket.sendall(str(file_size).encode())  # Send file size first
+                while True:
+                    data = file.read(4096)
+                    if not data:
+                        break
+                    c_socket.sendall(data)
+            c_socket.sendall(b"File transfer complete.")
+        except FileNotFoundError:
+            c_socket.sendall(f"Error: File {filename} not found.".encode())
+
+    def send_help(self, c_socket: socket.socket):
+        help_message = (
+            "/join <server_ip> <port> - Connect to the server\n"
+            "/leave - Disconnect from the server\n"
+            "/register <handle> - Register your handle\n"
+            "/store <filename> - Upload a file to the server\n"
+            "/dir - List files on the server\n"
+            "/get <filename> - Download a file from the server\n"
+            "/shutdown - Shutdown the server (authorized users only)\n"
+            "/? - Display this command list"
+        )
+        c_socket.sendall(help_message.encode())
 
 def main():
-    port = int(sys.argv[1])
+    if len(sys.argv) < 2:
+        print("No port specified. Using default port 12345.")
+        port = 12345
+    else:
+        port = int(sys.argv[1])
     server = Server(port)
     server.start()
 
