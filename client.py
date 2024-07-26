@@ -3,10 +3,11 @@ import sys
 import os
 import time
 import tkinter as tk
-from tkinter import scrolledtext
+from tkinter import scrolledtext, ttk
 from datetime import datetime
 import threading
 import queue
+import hashlib
 
 COMMANDS = [
     "/join <server_ip> <port> - Connect to the server",
@@ -50,6 +51,12 @@ class Client:
 
         self.send_button = tk.Button(self.root, text="Send", command=self.execute_command)
         self.send_button.grid(row=1, column=1, padx=10, pady=10)
+
+        # Add Progress Bar
+        self.progress = ttk.Progressbar(self.root, orient="horizontal", length=400, mode="determinate")
+        self.progress.grid(row=2, column=0, columnspan=2, padx=10, pady=10)
+        self.progress_label = tk.Label(self.root, text="")
+        self.progress_label.grid(row=3, column=0, columnspan=2, padx=10, pady=10)
 
         self.root.protocol("WM_DELETE_WINDOW", self.close_client)  # Handle window close event
 
@@ -109,8 +116,7 @@ class Client:
                 threading.Thread(target=self.send_broadcast, args=(message,)).start()
             elif command == "/store" and len(cmd_words) == 2:
                 fname = cmd_words[1]
-                start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                threading.Thread(target=self.send_file, args=(fname, start_time)).start()
+                threading.Thread(target=self.send_file, args=(fname,)).start()
             elif command == "/dir" and len(cmd_words) == 1:
                 threading.Thread(target=self.get_dir).start()
             elif command == "/get" and len(cmd_words) == 2:
@@ -173,23 +179,31 @@ class Client:
         except Exception as e:
             self.display_message(f"Error: Failed to send broadcast message. {e}")
 
-    def send_file(self, filename, start_time):
-        try:
-            with open(filename, 'rb') as file:
-                self.sck.sendall(f"/store {filename}".encode())
-                time.sleep(0.1)  # Small delay to ensure command is sent before file data
-                while True:
-                    data = file.read(4096)
-                    if not data:
-                        break
-                    self.sck.sendall(data)
-                self.sck.sendall(b"EOF")
-            
-            self.display_message(f"{self.handle}<{start_time}>: Uploaded {filename}")
-        except FileNotFoundError:
-            self.display_message(f"Error: File {filename} not found.")
-        except Exception as e:
-            self.display_message(f"Error: File upload failed. {e}")
+    def send_file(self, filename):
+        def upload_file():
+            try:
+                user_directory = os.path.join(os.getcwd(), self.handle)
+                file_path = os.path.join(user_directory, filename)
+                with open(file_path, 'rb') as file:
+                    self.sck.sendall(f"/store {filename}".encode())
+                    time.sleep(0.1)  # Small delay to ensure command is sent before file data
+                    while True:
+                        data = file.read(4096)
+                        if not data:
+                            break
+                        self.sck.sendall(data)
+                    self.sck.sendall(b"EOF")
+
+                self.display_message(f"Uploaded {filename} to server.")
+                self.progress_label["text"] = f"Upload of {filename} complete."
+            except FileNotFoundError:
+                self.display_message(f"Error: File {filename} not found.")
+                self.progress_label["text"] = f"Error uploading {filename}."
+            except Exception as e:
+                self.display_message(f"Error: File upload failed. {e}")
+                self.progress_label["text"] = f"Error uploading {filename}."
+
+        threading.Thread(target=upload_file).start()
 
     def get_dir(self):
         try:
@@ -204,35 +218,73 @@ class Client:
 
     def get_file(self, filename):
         def download_file():
-            try:
-                self.sck.sendall(f"/get {filename}".encode())
+            retries = 3
+            while retries > 0:
+                try:
+                    self.sck.sendall(f"/get {filename}".encode())
 
-                # Receive file size first
-                file_size_data = self.sck.recv(4096).decode()
-                if not file_size_data.isdigit():
-                    raise Exception(f"Unexpected server response: {file_size_data}")
+                    # Use the existing receive_file method to handle file download
+                    self.receive_file(filename)
 
-                file_size = int(file_size_data)
-                self.sck.sendall(b"ACK")  # Send acknowledgment
-
-                user_directory = os.path.join(os.getcwd(), self.handle)
-                os.makedirs(user_directory, exist_ok=True)
-
-                file_path = os.path.join(user_directory, filename)
-                received_size = 0
-                with open(file_path, 'wb') as file:
-                    while received_size < file_size:
-                        data = self.sck.recv(4096)
-                        if data == b"EOF":
-                            break
-                        file.write(data)
-                        received_size += len(data)
-
-                self.display_message(f"File {filename} downloaded.")
-            except Exception as e:
-                self.display_message(f"Error: File {filename} download failed. {e}")
+                    # If successful, break the loop
+                    break
+                except Exception as e:
+                    self.display_message(f"Error: File {filename} download failed. Retrying... ({retries-1} retries left)")
+                    retries -= 1
+                    if retries == 0:
+                        self.display_message(f"Error: File {filename} download failed after multiple attempts.")
+                        break
 
         threading.Thread(target=download_file).start()
+
+    def receive_file(self, filename: str):
+        user_directory = os.path.join(os.getcwd(), self.handle)
+        os.makedirs(user_directory, exist_ok=True)
+        file_path = os.path.join(user_directory, filename)
+
+        self.progress_label["text"] = f"Downloading {filename}..."
+
+        try:
+            # Receive the file size and checksum from the server
+            file_info = self.sck.recv(1024).decode().split()
+            file_size = int(file_info[0])
+            server_checksum = file_info[1]
+            self.sck.sendall(b'ACK')  # Send acknowledgment
+            received_size = 0
+
+            with open(file_path, 'wb') as file:
+                while received_size < file_size:
+                    data = self.sck.recv(4096)
+                    if data == b"EOF":
+                        break
+                    if not data:
+                        break
+                    file.write(data)
+                    received_size += len(data)
+                    self.sck.sendall(b'ACK')  # Send acknowledgment for each chunk
+
+            if received_size != file_size:
+                raise Exception("File size mismatch. Download failed.")
+            
+            client_checksum = self.calculate_checksum(file_path)
+            if client_checksum != server_checksum:
+                raise Exception("Checksum mismatch. Download failed.")
+            
+            self.display_message(f"File {filename} received successfully.")
+            self.progress_label["text"] = f"Download of {filename} complete."
+        except Exception as e:
+            self.display_message(f"Error receiving file: {e}")
+            self.progress_label["text"] = f"Error downloading {filename}."
+
+    def calculate_checksum(self, filepath: str) -> str:
+        sha256 = hashlib.sha256()
+        with open(filepath, 'rb') as file:
+            while True:
+                data = file.read(8192)
+                if not data:
+                    break
+                sha256.update(data)
+        return sha256.hexdigest()
 
     def shutdown_server(self):
         try:
@@ -252,7 +304,9 @@ class Client:
                 message = self.sck.recv(4096)
                 try:
                     decoded_message = message.decode()
-                    self.display_message(decoded_message)
+                    # Only display messages that are not control messages (e.g., file size and checksum)
+                    if not decoded_message.split()[0].isdigit():
+                        self.display_message(decoded_message)
                 except UnicodeDecodeError:
                     # Handle non-decodable message (binary data)
                     self.display_message("Received non-text data.")

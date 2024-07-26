@@ -1,9 +1,10 @@
-from typing import List, Dict
 import socket
-import os
 import sys
 import threading
+import os
 import time
+import hashlib
+from typing import List, Dict
 
 class Server:
     def __init__(self, port) -> None:
@@ -160,22 +161,39 @@ class Server:
             c_socket.sendall(f"Error: {e}".encode())
 
     def send_file(self, c_socket: socket.socket, filename: str):
-        filepath = os.path.join(self.server_directory, filename)  # Look for file in s_files directory
+        filepath = os.path.join(self.server_directory, filename)
         try:
-            with open(filepath, 'rb') as file:
-                file_size = os.path.getsize(filepath)
-                c_socket.sendall(str(file_size).encode())  # Send file size first
-                ack = c_socket.recv(1024).decode()  # Wait for ACK from client
-                if ack == "ACK":
+            file_size = os.path.getsize(filepath)
+            checksum = self.calculate_checksum(filepath)
+            c_socket.sendall(f"{file_size} {checksum}".encode())  # Send the file size and checksum first
+            ack = c_socket.recv(1024).decode()
+            if ack == 'ACK':
+                with open(filepath, 'rb') as file:
                     while True:
-                        data = file.read(4096)
-                        if not data:
+                        chunk = file.read(8192)  # Use a larger buffer size for efficiency
+                        if not chunk:
                             break
-                        c_socket.sendall(data)
+                        c_socket.sendall(chunk)
+                        # Wait for acknowledgment
+                        ack = c_socket.recv(1024).decode()
+                        if ack != 'ACK':
+                            raise Exception("Acknowledgment not received for a chunk. Retrying...")
                 time.sleep(0.1)  # Ensure all data is sent before sending EOF
                 c_socket.sendall(b"EOF")  # Indicate file transfer completion
         except FileNotFoundError:
             c_socket.sendall(f"Error: File {filename} not found.".encode())
+        except Exception as e:
+            c_socket.sendall(f"Error: {str(e)}".encode())
+
+    def calculate_checksum(self, filepath: str) -> str:
+        sha256 = hashlib.sha256()
+        with open(filepath, 'rb') as file:
+            while True:
+                data = file.read(8192)
+                if not data:
+                    break
+                sha256.update(data)
+        return sha256.hexdigest()
 
     def send_help(self, c_socket: socket.socket):
         help_message = (
