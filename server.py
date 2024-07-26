@@ -3,6 +3,7 @@ import socket
 import os
 import sys
 import threading
+import time
 
 class Server:
     def __init__(self, port) -> None:
@@ -69,6 +70,10 @@ class Server:
         except Exception as e:
             print(f"Error: {e}")
         finally:
+            if c_socket in self.clients:
+                self.clients.remove(c_socket)
+            if c_socket in self.handles:
+                self.handles.pop(c_socket, None)
             c_socket.close()
 
     def process_command(self, c_socket: socket.socket, msg: str):
@@ -81,7 +86,7 @@ class Server:
                 c_socket.sendall(f"Error: Handle {handle} already exists.".encode())
             else:
                 self.handles[c_socket] = handle
-                user_directory = os.path.join(self.server_directory, handle)
+                user_directory = os.path.join(os.getcwd(), handle)  # Create user-specific directory
                 os.makedirs(user_directory, exist_ok=True)
                 c_socket.sendall(f"Handle {handle} registered successfully.".encode())
         elif command == "/store" and len(msg_parts) == 2:
@@ -101,13 +106,34 @@ class Server:
                 self.shutdown()
             else:
                 c_socket.sendall(f"Error: Unauthorized shutdown attempt.".encode())
+        elif command == "/unicast" and len(msg_parts) > 2:
+            target_handle = msg_parts[1]
+            unicast_message = ' '.join(msg_parts[2:])
+            self.send_unicast(c_socket, target_handle, unicast_message)
+        elif command == "/broadcast" and len(msg_parts) > 1:
+            broadcast_message = ' '.join(msg_parts[1:])
+            self.send_broadcast(c_socket, broadcast_message)
         elif command == "/?":
             self.send_help(c_socket)
         else:
             c_socket.sendall(f"Unknown or invalid command: {command}".encode())
 
+    def send_unicast(self, c_socket: socket.socket, target_handle: str, message: str):
+        sender_handle = self.handles[c_socket]
+        for client, handle in self.handles.items():
+            if handle == target_handle:
+                client.sendall(f"Unicast from {sender_handle}: {message}".encode())
+                return
+        c_socket.sendall(f"Error: Handle {target_handle} not found.".encode())
+
+    def send_broadcast(self, c_socket: socket.socket, message: str):
+        sender_handle = self.handles[c_socket]
+        for client, handle in self.handles.items():
+            if client != c_socket:
+                client.sendall(f"Broadcast from {sender_handle}: {message}".encode())
+
     def receive_file(self, c_socket: socket.socket, filename: str):
-        filepath = os.path.join(self.server_directory, filename)
+        filepath = os.path.join(self.server_directory, filename)  # Save file in s_files directory
         try:
             with open(filepath, 'wb') as file:
                 while True:
@@ -126,25 +152,28 @@ class Server:
         try:
             files = os.listdir(self.server_directory)
             if files:
-                files_list = '\n'.join(files)
+                files_list = "Server Directory:\n" + '\n'.join(files)
             else:
-                files_list = "No files found."
+                files_list = "Server Directory:\nNo files found."
             c_socket.sendall(files_list.encode())
         except Exception as e:
             c_socket.sendall(f"Error: {e}".encode())
 
     def send_file(self, c_socket: socket.socket, filename: str):
-        filepath = os.path.join(self.server_directory, filename)
+        filepath = os.path.join(self.server_directory, filename)  # Look for file in s_files directory
         try:
             with open(filepath, 'rb') as file:
                 file_size = os.path.getsize(filepath)
                 c_socket.sendall(str(file_size).encode())  # Send file size first
-                while True:
-                    data = file.read(4096)
-                    if not data:
-                        break
-                    c_socket.sendall(data)
-            c_socket.sendall(b"File transfer complete.")
+                ack = c_socket.recv(1024).decode()  # Wait for ACK from client
+                if ack == "ACK":
+                    while True:
+                        data = file.read(4096)
+                        if not data:
+                            break
+                        c_socket.sendall(data)
+                time.sleep(0.1)  # Ensure all data is sent before sending EOF
+                c_socket.sendall(b"EOF")  # Indicate file transfer completion
         except FileNotFoundError:
             c_socket.sendall(f"Error: File {filename} not found.".encode())
 
@@ -153,6 +182,8 @@ class Server:
             "/join <server_ip> <port> - Connect to the server\n"
             "/leave - Disconnect from the server\n"
             "/register <handle> - Register your handle\n"
+            "/unicast <handle> <message> - Send a message to a specific user\n"
+            "/broadcast <message> - Send a message to all users\n"
             "/store <filename> - Upload a file to the server\n"
             "/dir - List files on the server\n"
             "/get <filename> - Download a file from the server\n"
