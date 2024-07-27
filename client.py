@@ -5,7 +5,6 @@ import tkinter as tk
 from tkinter import scrolledtext, ttk
 import threading
 import queue
-import hashlib
 import logging
 
 COMMANDS = [
@@ -220,11 +219,6 @@ class Client:
         except Exception as e:
             self.display_message(f"Error: {e}")
 
-
-
-
-
-
     def get_file(self, filename: str):
         try:
             self.sck.sendall(f"/get {filename}".encode())
@@ -240,7 +234,11 @@ class Client:
 
             with open(file_path, 'wb') as file:
                 while received_size < file_size:
+                    # Request the next chunk of the file
+                    self.sck.sendall(f"/get_chunk {filename} {received_size}".encode())
                     data = self.sck.recv(4096)
+                    if data == b"EOF":
+                        break
                     if not data:
                         break
                     file.write(data)
@@ -251,8 +249,10 @@ class Client:
                 
                 if received_size != file_size:
                     raise IOError("File size mismatch. Download failed.")
+            socket.close()
             self.display_message(f"File {filename} downloaded successfully.")
             logging.info(f"File {filename} downloaded successfully. Total received: {received_size}/{file_size} bytes.")
+        
         except ValueError as ve:
             self.display_message(f"Value error: {ve}")
             logging.error(f"Value error while downloading file: {ve}")
@@ -265,22 +265,6 @@ class Client:
         except Exception as e:
             self.display_message(f"Unexpected error: {e}")
             logging.error(f"Unexpected error while downloading file: {e}")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     def shutdown_server(self):
         try:

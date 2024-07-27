@@ -2,8 +2,6 @@ import socket
 import sys
 import threading
 import os
-import hashlib
-import time
 import logging
 from typing import Self
 
@@ -101,6 +99,10 @@ class Server:
         elif command == "/get" and len(msg_parts) == 2:
             filename = msg_parts[1]
             self.send_file(c_socket, filename)
+        elif command == "/get_chunk" and len(msg_parts) == 3:
+            filename = msg_parts[1]
+            offset = int(msg_parts[2])
+            self.send_file_chunk(c_socket, filename, offset)
         elif command == "/leave":
             c_socket.close()
             self.clients.remove(c_socket)
@@ -163,9 +165,6 @@ class Server:
         except Exception as e:
             c_socket.sendall(f"Error: {e}".encode())
 
-
-
-
     def send_file(self, c_socket: socket.socket, filename: str):
         filepath = os.path.join(self.server_directory, filename)
         try:
@@ -173,13 +172,6 @@ class Server:
                 file_size = os.path.getsize(filepath)
                 c_socket.sendall(str(file_size).encode())  # Send file size as a byte-encoded string
                 logging.info(f"Sent file size: {file_size} bytes for file {filename}")
-
-                while True:
-                    data = file.read(4096)
-                    if not data:
-                        break
-                    c_socket.sendall(data)
-                    logging.info(f"Sent data chunk of size {len(data)}")
         except FileNotFoundError:
             c_socket.sendall(f"Error: File {filename} not found.".encode())
             logging.error(f"File not found: {filename}")
@@ -187,8 +179,23 @@ class Server:
             c_socket.sendall(f"Error: {str(e)}".encode())
             logging.error(f"Error sending file {filename}: {e}")
 
-
-
+    def send_file_chunk(self, c_socket: socket.socket, filename: str, offset: int):
+        filepath = os.path.join(self.server_directory, filename)
+        try:
+            with open(filepath, 'rb') as file:
+                file.seek(offset)
+                data = file.read(4096)
+                if not data:
+                    c_socket.sendall(b"EOF")
+                    return
+                c_socket.sendall(data)
+                logging.info(f"Sent data chunk of size {len(data)} from offset {offset} for file {filename}")
+        except FileNotFoundError:
+            c_socket.sendall(f"Error: File {filename} not found.".encode())
+            logging.error(f"File not found: {filename}")
+        except Exception as e:
+            c_socket.sendall(f"Error: {str(e)}".encode())
+            logging.error(f"Error sending file chunk {filename}: {e}")
 
     def send_help(self, c_socket: socket.socket):
         help_message = (
