@@ -139,8 +139,7 @@ class Client:
         try:
             self.sck = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sck.connect((addr, port))
-            self.file_sck = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.file_sck.connect((addr, port + 1))  # Connect to file transfer port
+            self.file_port = port + 1  # Set the file transfer port
             self.connected = True
             self.display_message("Connection to the Messaging Server is successful!")
             threading.Thread(target=self.receive_messages, daemon=True).start()
@@ -151,7 +150,6 @@ class Client:
         try:
             if self.connected:
                 self.sck.close()
-                self.file_sck.close()
                 self.connected = False
                 self.display_message("Connection closed. Thank you!")
         except Exception as e:
@@ -227,22 +225,32 @@ class Client:
     def get_file(self, filename: str):
         threading.Thread(target=self.download_file, args=(filename,)).start()
 
+    def open_file_socket(self):
+        self.file_sck = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.file_sck.connect((self.addr, self.file_port))
+
+    def close_file_socket(self):
+        self.file_sck.close()
+
     def download_file(self, filename: str):
         try:
+            self.open_file_socket()
             self.file_sck.sendall(f"/get {filename}".encode())
 
             file_path = os.path.join(self.handle, filename)
 
             with open(file_path, 'wb') as file:
                 with self.file_sck.makefile('rb') as inp:
-                    shutil.copyfileobj(inp, file, length=16*1024)  # 16KB buffer for better performance
+                    shutil.copyfileobj(inp, file, length=1024*1024)  # 1MB buffer for better performance
 
             self.display_message(f"File {filename} downloaded successfully.")
             logging.info(f"File {filename} downloaded successfully.")
-    
+        
         except Exception as e:
             self.display_message(f"Error: {e}")
             logging.error(f"Error while downloading file: {e}")
+        finally:
+            self.close_file_socket()
 
     def shutdown_server(self):
         try:
