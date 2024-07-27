@@ -1,12 +1,12 @@
 import socket
 import os
-import time
 import tkinter as tk
 from tkinter import scrolledtext, ttk
 import threading
 import queue
 import logging
 import shutil
+import time
 
 COMMANDS = [
     "/join <server_ip> <port> - Connect to the server",
@@ -199,6 +199,11 @@ class Client:
                             break
                         self.sck.sendall(data)
                     self.sck.sendall(b"EOF")
+
+                # Send the upload notification with a timestamp
+                timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+                notification_message = f"{self.handle}<{timestamp}>: Uploaded {filename}"
+                self.sck.sendall(f"/broadcast {notification_message}".encode())
 
                 self.display_message(f"Uploaded {filename} to server.")
                 self.progress_label["text"] = f"Upload of {filename} complete."
