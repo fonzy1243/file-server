@@ -2,17 +2,19 @@ import socket
 import sys
 import threading
 import os
-import time
 import hashlib
-from typing import List, Dict
+import time
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class Server:
     def __init__(self, port) -> None:
         self.host = "127.0.0.1"
         self.port = port
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.clients: List[socket.socket] = []
-        self.handles: Dict[socket.socket, str] = {}
+        self.clients = []
+        self.handles = {}
         self.threads = []
         self.running = False
         self.shutdown_event = threading.Event()
@@ -23,14 +25,14 @@ class Server:
         try:
             self.socket.bind((self.host, self.port))
             self.socket.listen()
-            print(f"Server listening on {self.host}:{self.port}")
+            logging.info(f"Server listening on {self.host}:{self.port}")
             self.running = True
 
             while self.running:
                 try:
                     self.socket.settimeout(1.0)
                     c_socket, c_address = self.socket.accept()
-                    print(f"New connection from {c_address[0]}:{c_address[1]}")
+                    logging.info(f"New connection from {c_address[0]}:{c_address[1]}")
                     c_thread = threading.Thread(target=self.handle_client, args=(c_socket,))
                     c_thread.start()
                     self.clients.append(c_socket)
@@ -39,13 +41,13 @@ class Server:
                     if self.shutdown_event.is_set():
                         self.running = False
                 except Exception as e:
-                    print(f"Error: {e}")
+                    logging.error(f"Error: {e}")
         except KeyboardInterrupt:
-            print("Shutting down server...")
+            logging.info("Shutting down server...")
         except ConnectionResetError:
-            print("Error: Connection forcefully terminated by client.")
+            logging.error("Error: Connection forcefully terminated by client.")
         except socket.error as e:
-            print(f"Error: Error starting server {e}")
+            logging.error(f"Error: Error starting server {e}")
         finally:
             self.shutdown()
 
@@ -57,7 +59,7 @@ class Server:
         for t in self.threads:
             t.join()
         self.socket.close()
-        print("Server closed.")
+        logging.info("Server closed.")
 
     def handle_client(self, c_socket: socket.socket):
         try:
@@ -66,10 +68,10 @@ class Server:
                 if not msg:
                     break
                 
-                print(f"Received message: {msg}")
+                logging.info(f"Received message: {msg}")
                 self.process_command(c_socket, msg)
         except Exception as e:
-            print(f"Error: {e}")
+            logging.error(f"Error: {e}")
         finally:
             if c_socket in self.clients:
                 self.clients.remove(c_socket)
@@ -165,19 +167,21 @@ class Server:
         try:
             file_size = os.path.getsize(filepath)
             checksum = self.calculate_checksum(filepath)
-            c_socket.sendall(f"{file_size} {checksum}".encode())  # Send the file size and checksum first
+            c_socket.sendall(f"{file_size} {checksum}".encode())
+            logging.info(f"Sent file info: size={file_size}, checksum={checksum}")
             ack = c_socket.recv(1024).decode()
-            if ack == 'ACK':
-                with open(filepath, 'rb') as file:
-                    while True:
-                        chunk = file.read(8192)  # Use a larger buffer size for efficiency
-                        if not chunk:
-                            break
-                        c_socket.sendall(chunk)
-                        # Wait for acknowledgment
-                        ack = c_socket.recv(1024).decode()
-                        if ack != 'ACK':
-                            raise Exception("Acknowledgment not received for a chunk. Retrying...")
+            if ack != 'ACK':
+                raise Exception("Failed to receive ACK from client.")
+            
+            with open(filepath, 'rb') as file:
+                while True:
+                    data = file.read(4096)
+                    if not data:
+                        break
+                    c_socket.sendall(data)
+                    ack = c_socket.recv(1024).decode()
+                    if ack != 'ACK':
+                        raise Exception("Failed to receive ACK from client for a chunk.")
                 time.sleep(0.1)  # Ensure all data is sent before sending EOF
                 c_socket.sendall(b"EOF")  # Indicate file transfer completion
         except FileNotFoundError:
@@ -212,7 +216,7 @@ class Server:
 
 def main():
     if len(sys.argv) < 2:
-        print("No port specified. Using default port 12345.")
+        logging.info("No port specified. Using default port 12345.")
         port = 12345
     else:
         port = int(sys.argv[1])

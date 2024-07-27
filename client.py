@@ -8,6 +8,7 @@ from datetime import datetime
 import threading
 import queue
 import hashlib
+import logging
 
 COMMANDS = [
     "/join <server_ip> <port> - Connect to the server",
@@ -26,6 +27,8 @@ COMMANDS = [
 HANDLE_REQUIRED = [
     "/store", "/dir", "/get", "/shutdown", "/unicast", "/broadcast"
 ]
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class Client:
     def __init__(self) -> None:
@@ -79,7 +82,7 @@ class Client:
 
     def display_message(self, message):
         self.queue.put(message)
-        print(message)  # Print message to the command line
+        logging.info(message)  # Log message for better debugging
 
     def get_command(self, cmd: str):
         try:
@@ -247,6 +250,9 @@ class Client:
         try:
             # Receive the file size and checksum from the server
             file_info = self.sck.recv(1024).decode().split()
+            if len(file_info) != 2:
+                raise Exception("Invalid server response format")
+
             file_size = int(file_info[0])
             server_checksum = file_info[1]
             self.sck.sendall(b'ACK')  # Send acknowledgment
@@ -305,7 +311,7 @@ class Client:
                 try:
                     decoded_message = message.decode()
                     # Only display messages that are not control messages (e.g., file size and checksum)
-                    if not decoded_message.split()[0].isdigit():
+                    if not self.is_control_message(decoded_message):
                         self.display_message(decoded_message)
                 except UnicodeDecodeError:
                     # Handle non-decodable message (binary data)
@@ -313,6 +319,13 @@ class Client:
             except Exception as e:
                 self.display_message(f"Receive error: {e}")
                 break
+
+    def is_control_message(self, message):
+        # Check if the message is a control message by looking for file size and checksum format
+        parts = message.split()
+        if len(parts) == 2 and parts[0].isdigit() and len(parts[1]) == 64:
+            return True
+        return False
 
     def reconnect(self):
         last_handle = self.handle
