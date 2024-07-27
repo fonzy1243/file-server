@@ -158,6 +158,10 @@ class Client:
         except Exception as e:
             self.display_message(f"Error: {e}")
 
+
+
+
+
     def get_file(self, filename):
         try:
             self.sck.sendall(f"/get {filename}".encode())
@@ -179,6 +183,10 @@ class Client:
             self.display_message(f"File {filename} downloaded.")
         except Exception as e:
             self.display_message(f"Error: File {filename} download failed. {e}")
+
+
+
+
 
     def shutdown_server(self):
         try:
