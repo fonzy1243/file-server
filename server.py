@@ -3,15 +3,17 @@ import sys
 import threading
 import os
 import logging
-from typing import Self
+import shutil
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class Server:
-    def __init__(self, port) -> None:
+    def __init__(self, port):
         self.host = "127.0.0.1"
         self.port = port
+        self.file_port = port + 1  # Separate port for file transfers
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.file_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.clients = []
         self.handles = {}
         self.threads = []
@@ -24,8 +26,12 @@ class Server:
         try:
             self.socket.bind((self.host, self.port))
             self.socket.listen()
-            logging.info(f"Server listening on {self.host}:{self.port}")
+            self.file_socket.bind((self.host, self.file_port))
+            self.file_socket.listen()
+            logging.info(f"Server listening on {self.host}:{self.port} for commands and {self.host}:{self.file_port} for file transfers")
             self.running = True
+
+            threading.Thread(target=self.accept_file_connections, daemon=True).start()
 
             while self.running:
                 try:
@@ -50,6 +56,16 @@ class Server:
         finally:
             self.shutdown()
 
+    def accept_file_connections(self):
+        while self.running:
+            try:
+                f_socket, f_address = self.file_socket.accept()
+                logging.info(f"New file transfer connection from {f_address[0]}:{f_address[1]}")
+                f_thread = threading.Thread(target=self.handle_file_transfer, args=(f_socket,))
+                f_thread.start()
+            except Exception as e:
+                logging.error(f"Error: {e}")
+
     def shutdown(self):
         self.shutdown_event.set()
         self.running = False
@@ -58,6 +74,7 @@ class Server:
         for t in self.threads:
             t.join()
         self.socket.close()
+        self.file_socket.close()
         logging.info("Server closed.")
 
     def handle_client(self, c_socket: socket.socket):
@@ -78,6 +95,17 @@ class Server:
                 self.handles.pop(c_socket, None)
             c_socket.close()
 
+    def handle_file_transfer(self, f_socket: socket.socket):
+        try:
+            msg = f_socket.recv(1024).decode()
+            if msg.startswith("/get"):
+                _, filename = msg.split()
+                self.send_file(f_socket, filename)
+        except Exception as e:
+            logging.error(f"Error: {e}")
+        finally:
+            f_socket.close()
+
     def process_command(self, c_socket: socket.socket, msg: str):
         msg_parts = msg.split()
         command = msg_parts[0]
@@ -96,13 +124,6 @@ class Server:
             self.receive_file(c_socket, filename)
         elif command == "/dir":
             self.send_directory_list(c_socket)
-        elif command == "/get" and len(msg_parts) == 2:
-            filename = msg_parts[1]
-            self.send_file(c_socket, filename)
-        elif command == "/get_chunk" and len(msg_parts) == 3:
-            filename = msg_parts[1]
-            offset = int(msg_parts[2])
-            self.send_file_chunk(c_socket, filename, offset)
         elif command == "/leave":
             c_socket.close()
             self.clients.remove(c_socket)
@@ -165,37 +186,19 @@ class Server:
         except Exception as e:
             c_socket.sendall(f"Error: {e}".encode())
 
-    def send_file(self, c_socket: socket.socket, filename: str):
+    def send_file(self, f_socket: socket.socket, filename: str):
         filepath = os.path.join(self.server_directory, filename)
         try:
             with open(filepath, 'rb') as file:
-                file_size = os.path.getsize(filepath)
-                c_socket.sendall(str(file_size).encode())  # Send file size as a byte-encoded string
-                logging.info(f"Sent file size: {file_size} bytes for file {filename}")
+                with f_socket.makefile('wb') as out:
+                    shutil.copyfileobj(file, out)
+                logging.info(f"File {filename} sent successfully.")
         except FileNotFoundError:
-            c_socket.sendall(f"Error: File {filename} not found.".encode())
+            f_socket.sendall(f"Error: File {filename} not found.".encode())
             logging.error(f"File not found: {filename}")
         except Exception as e:
-            c_socket.sendall(f"Error: {str(e)}".encode())
+            f_socket.sendall(f"Error: {str(e)}".encode())
             logging.error(f"Error sending file {filename}: {e}")
-
-    def send_file_chunk(self, c_socket: socket.socket, filename: str, offset: int):
-        filepath = os.path.join(self.server_directory, filename)
-        try:
-            with open(filepath, 'rb') as file:
-                file.seek(offset)
-                data = file.read(4096)
-                if not data:
-                    c_socket.sendall(b"EOF")
-                    return
-                c_socket.sendall(data)
-                logging.info(f"Sent data chunk of size {len(data)} from offset {offset} for file {filename}")
-        except FileNotFoundError:
-            c_socket.sendall(f"Error: File {filename} not found.".encode())
-            logging.error(f"File not found: {filename}")
-        except Exception as e:
-            c_socket.sendall(f"Error: {str(e)}".encode())
-            logging.error(f"Error sending file chunk {filename}: {e}")
 
     def send_help(self, c_socket: socket.socket):
         help_message = (

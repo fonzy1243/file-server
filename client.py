@@ -6,6 +6,7 @@ from tkinter import scrolledtext, ttk
 import threading
 import queue
 import logging
+import shutil
 
 COMMANDS = [
     "/join <server_ip> <port> - Connect to the server",
@@ -30,10 +31,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 class Client:
     def __init__(self) -> None:
         self.sck = None
+        self.file_sck = None
         self.handle = None
         self.connected = False
         self.addr = None
         self.port = None
+        self.file_port = None
         self.queue = queue.Queue()
         self.create_ui()
 
@@ -136,6 +139,8 @@ class Client:
         try:
             self.sck = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sck.connect((addr, port))
+            self.file_sck = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.file_sck.connect((addr, port + 1))  # Connect to file transfer port
             self.connected = True
             self.display_message("Connection to the Messaging Server is successful!")
             threading.Thread(target=self.receive_messages, daemon=True).start()
@@ -146,6 +151,7 @@ class Client:
         try:
             if self.connected:
                 self.sck.close()
+                self.file_sck.close()
                 self.connected = False
                 self.display_message("Connection closed. Thank you!")
         except Exception as e:
@@ -159,7 +165,6 @@ class Client:
             confirmation = self.sck.recv(4096).decode()
             
             if "Handle registered successfully." in confirmation:
-               # self.display_message(f"Welcome {handle}!")
                 os.makedirs(handle, exist_ok=True)  # Create directory for the user
             elif "Error: Handle" in confirmation and "already exists" in confirmation:
                 raise Exception("Error: Registration failed. Handle or alias already exists.")
@@ -220,51 +225,24 @@ class Client:
             self.display_message(f"Error: {e}")
 
     def get_file(self, filename: str):
-        try:
-            self.sck.sendall(f"/get {filename}".encode())
+        threading.Thread(target=self.download_file, args=(filename,)).start()
 
-            # First, get the file size
-            file_size_str = self.sck.recv(4096).decode()
-            file_size = int(file_size_str)
-            self.display_message(f"File size: {file_size} bytes")
-            logging.info(f"Received file size: {file_size} bytes for file {filename}")
+    def download_file(self, filename: str):
+        try:
+            self.file_sck.sendall(f"/get {filename}".encode())
 
             file_path = os.path.join(self.handle, filename)
-            received_size = 0
 
             with open(file_path, 'wb') as file:
-                while received_size < file_size:
-                    # Request the next chunk of the file
-                    self.sck.sendall(f"/get_chunk {filename} {received_size}".encode())
-                    data = self.sck.recv(4096)
-                    if data == b"EOF":
-                        break
-                    if not data:
-                        break
-                    file.write(data)
-                    received_size += len(data)
-                    self.progress['value'] = (received_size / file_size) * 100
-                    self.root.update_idletasks()
-                    logging.info(f"Received data chunk of size {len(data)}. Total received: {received_size}/{file_size} bytes.")
-                
-                if received_size != file_size:
-                    raise IOError("File size mismatch. Download failed.")
-            socket.close()
+                with self.file_sck.makefile('rb') as inp:
+                    shutil.copyfileobj(inp, file, length=16*1024)  # 16KB buffer for better performance
+
             self.display_message(f"File {filename} downloaded successfully.")
-            logging.info(f"File {filename} downloaded successfully. Total received: {received_size}/{file_size} bytes.")
-        
-        except ValueError as ve:
-            self.display_message(f"Value error: {ve}")
-            logging.error(f"Value error while downloading file: {ve}")
-        except socket.error as se:
-            self.display_message(f"Socket error: {se}")
-            logging.error(f"Socket error while downloading file: {se}")
-        except IOError as ioe:
-            self.display_message(f"IO error: {ioe}")
-            logging.error(f"IO error while downloading file: {ioe}")
+            logging.info(f"File {filename} downloaded successfully.")
+    
         except Exception as e:
-            self.display_message(f"Unexpected error: {e}")
-            logging.error(f"Unexpected error while downloading file: {e}")
+            self.display_message(f"Error: {e}")
+            logging.error(f"Error while downloading file: {e}")
 
     def shutdown_server(self):
         try:
@@ -284,18 +262,15 @@ class Client:
                 message = self.sck.recv(4096)
                 try:
                     decoded_message = message.decode()
-                    # Only display messages that are not control messages (e.g., file size and checksum)
                     if not self.is_control_message(decoded_message):
                         self.display_message(decoded_message)
                 except UnicodeDecodeError:
-                    # Handle non-decodable message (binary data)
                     self.display_message("Received non-text data.")
             except Exception as e:
                 self.display_message(f"Receive error: {e}")
                 break
 
     def is_control_message(self, message):
-        # Check if the message is a control message by looking for file size format
         if message.isdigit():
             return True
         return False
