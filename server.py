@@ -5,6 +5,7 @@ import os
 import hashlib
 import time
 import logging
+from typing import Self
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -162,42 +163,32 @@ class Server:
         except Exception as e:
             c_socket.sendall(f"Error: {e}".encode())
 
+
+
+
     def send_file(self, c_socket: socket.socket, filename: str):
         filepath = os.path.join(self.server_directory, filename)
         try:
-            file_size = os.path.getsize(filepath)
-            checksum = self.calculate_checksum(filepath)
-            c_socket.sendall(f"{file_size} {checksum}".encode())
-            logging.info(f"Sent file info: size={file_size}, checksum={checksum}")
-            ack = c_socket.recv(1024).decode()
-            if ack != 'ACK':
-                raise Exception("Failed to receive ACK from client.")
-            
             with open(filepath, 'rb') as file:
+                file_size = os.path.getsize(filepath)
+                c_socket.sendall(str(file_size).encode())  # Send file size as a byte-encoded string
+                logging.info(f"Sent file size: {file_size} bytes for file {filename}")
+
                 while True:
                     data = file.read(4096)
                     if not data:
                         break
                     c_socket.sendall(data)
-                    ack = c_socket.recv(1024).decode()
-                    if ack != 'ACK':
-                        raise Exception("Failed to receive ACK from client for a chunk.")
-                time.sleep(0.1)  # Ensure all data is sent before sending EOF
-                c_socket.sendall(b"EOF")  # Indicate file transfer completion
+                    logging.info(f"Sent data chunk of size {len(data)}")
         except FileNotFoundError:
             c_socket.sendall(f"Error: File {filename} not found.".encode())
+            logging.error(f"File not found: {filename}")
         except Exception as e:
             c_socket.sendall(f"Error: {str(e)}".encode())
+            logging.error(f"Error sending file {filename}: {e}")
 
-    def calculate_checksum(self, filepath: str) -> str:
-        sha256 = hashlib.sha256()
-        with open(filepath, 'rb') as file:
-            while True:
-                data = file.read(8192)
-                if not data:
-                    break
-                sha256.update(data)
-        return sha256.hexdigest()
+
+
 
     def send_help(self, c_socket: socket.socket):
         help_message = (

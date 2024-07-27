@@ -1,10 +1,8 @@
 import socket
-import sys
 import os
 import time
 import tkinter as tk
 from tkinter import scrolledtext, ttk
-from datetime import datetime
 import threading
 import queue
 import hashlib
@@ -78,6 +76,7 @@ class Client:
     def execute_command(self, event=None):
         cmd = self.input_field.get()
         self.input_field.delete(0, tk.END)
+        logging.info(f"User entered command: {cmd}")  # Log the user command
         threading.Thread(target=self.get_command, args=(cmd,)).start()
 
     def display_message(self, message):
@@ -154,12 +153,14 @@ class Client:
             self.display_message(f"Error: Disconnection failed. {e}")
 
     def register(self, handle):
+        self.display_message(f"Welcome {handle}!")
         try:
             self.handle = handle
             self.sck.sendall(f"/register {handle}".encode())
             confirmation = self.sck.recv(4096).decode()
+            
             if "Handle registered successfully." in confirmation:
-                self.display_message(f"Welcome {handle}!")
+               # self.display_message(f"Welcome {handle}!")
                 os.makedirs(handle, exist_ok=True)  # Create directory for the user
             elif "Error: Handle" in confirmation and "already exists" in confirmation:
                 raise Exception("Error: Registration failed. Handle or alias already exists.")
@@ -219,78 +220,67 @@ class Client:
         except Exception as e:
             self.display_message(f"Error: {e}")
 
-    def get_file(self, filename):
-        def download_file():
-            retries = 3
-            while retries > 0:
-                try:
-                    self.sck.sendall(f"/get {filename}".encode())
 
-                    # Use the existing receive_file method to handle file download
-                    self.receive_file(filename)
 
-                    # If successful, break the loop
-                    break
-                except Exception as e:
-                    self.display_message(f"Error: File {filename} download failed. Retrying... ({retries-1} retries left)")
-                    retries -= 1
-                    if retries == 0:
-                        self.display_message(f"Error: File {filename} download failed after multiple attempts.")
-                        break
 
-        threading.Thread(target=download_file).start()
 
-    def receive_file(self, filename: str):
-        user_directory = os.path.join(os.getcwd(), self.handle)
-        os.makedirs(user_directory, exist_ok=True)
-        file_path = os.path.join(user_directory, filename)
 
-        self.progress_label["text"] = f"Downloading {filename}..."
-
+    def get_file(self, filename: str):
         try:
-            # Receive the file size and checksum from the server
-            file_info = self.sck.recv(1024).decode().split()
-            if len(file_info) != 2:
-                raise Exception("Invalid server response format")
+            self.sck.sendall(f"/get {filename}".encode())
 
-            file_size = int(file_info[0])
-            server_checksum = file_info[1]
-            self.sck.sendall(b'ACK')  # Send acknowledgment
+            # First, get the file size
+            file_size_str = self.sck.recv(4096).decode()
+            file_size = int(file_size_str)
+            self.display_message(f"File size: {file_size} bytes")
+            logging.info(f"Received file size: {file_size} bytes for file {filename}")
+
+            file_path = os.path.join(self.handle, filename)
             received_size = 0
 
             with open(file_path, 'wb') as file:
                 while received_size < file_size:
                     data = self.sck.recv(4096)
-                    if data == b"EOF":
-                        break
                     if not data:
                         break
                     file.write(data)
                     received_size += len(data)
-                    self.sck.sendall(b'ACK')  # Send acknowledgment for each chunk
-
-            if received_size != file_size:
-                raise Exception("File size mismatch. Download failed.")
-            
-            client_checksum = self.calculate_checksum(file_path)
-            if client_checksum != server_checksum:
-                raise Exception("Checksum mismatch. Download failed.")
-            
-            self.display_message(f"File {filename} received successfully.")
-            self.progress_label["text"] = f"Download of {filename} complete."
+                    self.progress['value'] = (received_size / file_size) * 100
+                    self.root.update_idletasks()
+                    logging.info(f"Received data chunk of size {len(data)}. Total received: {received_size}/{file_size} bytes.")
+                
+                if received_size != file_size:
+                    raise IOError("File size mismatch. Download failed.")
+            self.display_message(f"File {filename} downloaded successfully.")
+            logging.info(f"File {filename} downloaded successfully. Total received: {received_size}/{file_size} bytes.")
+        except ValueError as ve:
+            self.display_message(f"Value error: {ve}")
+            logging.error(f"Value error while downloading file: {ve}")
+        except socket.error as se:
+            self.display_message(f"Socket error: {se}")
+            logging.error(f"Socket error while downloading file: {se}")
+        except IOError as ioe:
+            self.display_message(f"IO error: {ioe}")
+            logging.error(f"IO error while downloading file: {ioe}")
         except Exception as e:
-            self.display_message(f"Error receiving file: {e}")
-            self.progress_label["text"] = f"Error downloading {filename}."
+            self.display_message(f"Unexpected error: {e}")
+            logging.error(f"Unexpected error while downloading file: {e}")
 
-    def calculate_checksum(self, filepath: str) -> str:
-        sha256 = hashlib.sha256()
-        with open(filepath, 'rb') as file:
-            while True:
-                data = file.read(8192)
-                if not data:
-                    break
-                sha256.update(data)
-        return sha256.hexdigest()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     def shutdown_server(self):
         try:
@@ -321,9 +311,8 @@ class Client:
                 break
 
     def is_control_message(self, message):
-        # Check if the message is a control message by looking for file size and checksum format
-        parts = message.split()
-        if len(parts) == 2 and parts[0].isdigit() and len(parts[1]) == 64:
+        # Check if the message is a control message by looking for file size format
+        if message.isdigit():
             return True
         return False
 
