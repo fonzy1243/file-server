@@ -144,7 +144,8 @@ class Server:
                     if not data:
                         break
                     c_socket.sendall(data)
-            c_socket.sendall(b"File transfer complete.")
+                    socket.close
+            #socket.sendall(b"File transfer complete.")
         except FileNotFoundError:
             c_socket.sendall(f"Error: File {filename} not found.".encode())
 
