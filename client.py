@@ -116,8 +116,8 @@ class Client:
             if command == "/join" and len(cmd_words) == 3:
                 self.addr = cmd_words[1]
                 self.port = int(cmd_words[2])
-                if self.port == 5001:
-                    raise Exception("Error: Port 5001 is reserved and cannot be used.")
+                if self.port == 5001 or self.port == 5002:
+                    raise Exception("Error: Port 5001 and 5002 is reserved and cannot be used.")
                 threading.Thread(target=self.connect, args=(self.addr, self.port)).start()
             elif command == "/leave" and len(cmd_words) == 1:
                 self.disconnect()
@@ -153,7 +153,8 @@ class Client:
         try:
             self.sck = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sck.connect((addr, port))
-            self.file_port = port + 1  # Set the file transfer port
+            self.file_port = 5001  # Set the file transfer port
+            self.dir_port = 5002  # Separate port for directory listing
             self.connected = True
             self.display_message("Connection to the Messaging Server is successful!")
             threading.Thread(target=self.receive_messages, daemon=True).start()
