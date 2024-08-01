@@ -91,14 +91,25 @@ class Client:
             if not cmd_words:
                 raise Exception("Error: Command cannot be empty.")
             command = cmd_words[0]
+            
+            
+            # List of valid commands
+            valid_commands = ["/?", "/help", "/join", "/leave", "/register", "/unicast", "/broadcast", 
+                            "/store", "/dir", "/get", "/shutdown", "/close"]
+
+            if command not in valid_commands:
+                raise Exception("Error: Command not found.")
 
             if command == "/?" or command == "/help" and len(cmd_words) == 1:
                 self.get_help()
                 return
 
+            if command == "/leave" and not self.connected:
+                raise Exception("Error: Disconnection failed. Please connect to the server first.")
+
             if command != "/join" and not self.connected:
                 raise Exception("Error: You are not connected to the server.")
-
+            
             if command in HANDLE_REQUIRED and self.handle is None:
                 raise Exception("Error: You must be registered to use this command.")
 
@@ -131,7 +142,7 @@ class Client:
             elif command == "/close" and len(cmd_words) == 1:
                 self.close_client()
             else:
-                raise Exception("Error: Unknown command or incorrect number of arguments. Type /? or /help for the command list.")
+                raise Exception("Error: Unknown command or incorrect number of arguments or Command parameters do not match or is not allowed.. Type /? or /help for the command list.")
         except Exception as e:
             self.display_message(str(e))
 
@@ -144,8 +155,8 @@ class Client:
             self.display_message("Connection to the Messaging Server is successful!")
             threading.Thread(target=self.receive_messages, daemon=True).start()
         except Exception as e:
-            self.display_message(f"Error: Connection to the Server has failed! {e}")
-
+            self.display_message(f"Error: Connection to the Server has failed! Please check IP Address and Port Number.")
+            #self.display_message(f"Error: Connection to the Server has failed! Please check IP Address and Port Number. {e}") # Uncomment for detailed error message
     def disconnect(self):
         try:
             if self.connected:
@@ -156,11 +167,13 @@ class Client:
             self.display_message(f"Error: Disconnection failed. {e}")
 
     def register(self, handle):
-        self.display_message(f"Welcome {handle}!")
+        #self.display_message(f"Welcome {handle}!")
         try:
             self.handle = handle
             self.sck.sendall(f"/register {handle}".encode())
+            self.display_message(f"Welcome {self.handle}!")
             confirmation = self.sck.recv(4096).decode()
+            
             
             if "Handle registered successfully." in confirmation:
                 os.makedirs(handle, exist_ok=True)  # Create directory for the user
@@ -237,18 +250,27 @@ class Client:
     def close_file_socket(self):
         self.file_sck.close()
 
+
     def download_file(self, filename: str):
         try:
             self.open_file_socket()
             self.file_sck.sendall(f"/get {filename}".encode())
 
+            # Receive the first response from the server to check for errors
+            initial_response = self.file_sck.recv(4096).decode()
+            if initial_response.startswith("Error:"):
+                self.display_message(initial_response)
+                logging.error(initial_response)
+                return
+
             file_path = os.path.join(self.handle, filename)
 
             with open(file_path, 'wb') as file:
+                file.write(initial_response.encode())  # Write the initial response to the file
                 with self.file_sck.makefile('rb') as inp:
                     shutil.copyfileobj(inp, file, length=1024*1024)  # 1MB buffer for better performance
 
-            self.display_message(f"File {filename} downloaded successfully.")
+            self.display_message(f"File {filename} downloaded successfully and received from Server.")
             logging.info(f"File {filename} downloaded successfully.")
         
         except Exception as e:

@@ -194,11 +194,14 @@ class Server:
                     shutil.copyfileobj(file, out)
                 logging.info(f"File {filename} sent successfully.")
         except FileNotFoundError:
-            f_socket.sendall(f"Error: File {filename} not found.".encode())
+            error_message = f"Error: File {filename} not found."
+            f_socket.sendall(error_message.encode())
             logging.error(f"File not found: {filename}")
         except Exception as e:
-            f_socket.sendall(f"Error: {str(e)}".encode())
+            error_message = f"Error: {str(e)}"
+            f_socket.sendall(error_message.encode())
             logging.error(f"Error sending file {filename}: {e}")
+
 
     def send_help(self, c_socket: socket.socket):
         help_message = (
