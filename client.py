@@ -147,6 +147,7 @@ class Client:
                 raise Exception("Error: Unknown command or incorrect number of arguments or Command parameters do not match or is not allowed.. Type /? or /help for the command list.")
         except Exception as e:
             self.display_message(str(e))
+            #self.display_message(f"Error: Connection to the Server has failed! Please check IP Address and Port Number.{e}")
             logging.error(str(e))
 
     def connect(self, addr, port):

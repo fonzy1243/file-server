@@ -113,6 +113,7 @@ class Server:
             t.join()
         self.socket.close()
         self.file_socket.close()
+        self.dir_socket.close()
         logging.info("Server closed.")
 
     def handle_client(self, c_socket: socket.socket):
