@@ -116,6 +116,8 @@ class Client:
             if command == "/join" and len(cmd_words) == 3:
                 self.addr = cmd_words[1]
                 self.port = int(cmd_words[2])
+                if self.port == 5001:
+                    raise Exception("Error: Port 5001 is reserved and cannot be used.")
                 threading.Thread(target=self.connect, args=(self.addr, self.port)).start()
             elif command == "/leave" and len(cmd_words) == 1:
                 self.disconnect()
@@ -133,7 +135,7 @@ class Client:
                 fname = cmd_words[1]
                 threading.Thread(target=self.send_file, args=(fname,)).start()
             elif command == "/dir" and len(cmd_words) == 1:
-                threading.Thread(target=self.get_dir).start()
+                self.get_dir()  # Handle /dir command synchronously
             elif command == "/get" and len(cmd_words) == 2:
                 fname = cmd_words[1]
                 threading.Thread(target=self.get_file, args=(fname,)).start()
@@ -158,14 +160,17 @@ class Client:
         except Exception as e:
             self.display_message(f"Error: Connection to the Server has failed! Please check IP Address and Port Number.")
             #self.display_message(f"Error: Connection to the Server has failed! Please check IP Address and Port Number. {e}") # Uncomment for detailed error message
+            
     def disconnect(self):
         try:
             if self.connected:
                 self.sck.close()
                 self.connected = False
                 self.display_message("Connection closed. Thank you!")
-        except Exception as e:
-            self.display_message(f"Error: Disconnection failed. {e}")
+        except socket.error as e:
+            if e.errno != 10053:  # Ignore specific WinError 10053
+                self.display_message(f"Error: Disconnection failed. {e}")
+
 
     def register(self, handle):
         #self.display_message(f"Welcome {handle}!")
@@ -181,9 +186,10 @@ class Client:
             elif "Error: Handle" in confirmation and "already exists" in confirmation:
                 raise Exception("Error: Registration failed. Handle or alias already exists.")
             else:
-                self.display_message(confirmation)  # Display any other server response
+               logging.error(confirmation)  # Display any other server response
+                #self.display_message(confirmation)  # Display any other server response
         except Exception as e:
-            self.display_message(f"Error: {e}")
+           # self.display_message(f"Error: {e}") # Uncomment for detailed error message to be displayed on the client GUI
             logging.error(f"Error: {e}")
 
     def send_unicast(self, target_handle, message):
@@ -220,6 +226,7 @@ class Client:
                 notification_message = f"{self.handle}<{timestamp}>: Uploaded {filename}"
                 self.sck.sendall(f"/broadcast {notification_message}".encode())
 
+                self.display_message(f"{self.handle}<{timestamp}>: Uploaded {filename}")
                 self.display_message(f"Uploaded {filename} to server.")
                 self.progress_label["text"] = f"Upload of {filename} complete."
             except FileNotFoundError:
@@ -231,26 +238,50 @@ class Client:
 
         threading.Thread(target=upload_file).start()
 
+
     def get_dir(self):
         try:
-            self.sck.sendall("/dir".encode())
-            response = self.sck.recv(4096).decode()
-            if response.startswith("Server Directory:"):
-                self.display_message(response)
-            else:
-                self.display_message(f"Unexpected server response: {response}")
+            self.open_dir_socket()
+            logging.info("Sending /dir command to server")
+            self.dir_sck.sendall("/dir".encode())
+            raw_response = self.dir_sck.recv(4096)
+            response = raw_response.decode()
+            logging.info(f"Raw response: {raw_response}")
+            logging.info(f"Received directory listing: {response}")
+            self.display_message(response)
+        except UnicodeDecodeError as e:
+            error_message = f"Error decoding response: {e}"
+            logging.error(error_message)
+            self.display_message("Received non-text data.")
         except Exception as e:
-            self.display_message(f"Error: {e}")
+            error_message = f"Error: {e}"
+            logging.error(error_message)
+            self.display_message(error_message)
+        finally:
+            self.close_dir_socket()
+
+
+
+
+
 
     def get_file(self, filename: str):
         threading.Thread(target=self.download_file, args=(filename,)).start()
 
     def open_file_socket(self):
         self.file_sck = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.file_sck.connect((self.addr, self.file_port))
+        self.file_sck.connect((self.addr, 5001))
 
     def close_file_socket(self):
         self.file_sck.close()
+
+
+    def open_dir_socket(self):
+        self.dir_sck = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.dir_sck.connect((self.addr, 5002))
+
+    def close_dir_socket(self):
+        self.dir_sck.close()
 
 
     def download_file(self, filename: str):
@@ -272,12 +303,18 @@ class Client:
                 with self.file_sck.makefile('rb') as inp:
                     shutil.copyfileobj(inp, file, length=1024*1024)  # 1MB buffer for better performance
 
+
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+            self.display_message(f"{self.handle}<{timestamp}>: Downloaded {filename}")
             self.display_message(f"File {filename} downloaded successfully and received from Server.")
+            self.progress_label["text"] = f"Upload of {filename} complete."
             logging.info(f"File {filename} downloaded successfully.")
         
         except Exception as e:
-            self.display_message(f"Error: {e}")
+            #self.display_message(f"Error: {e}")
+            logging.error(f"Error: {e}")
             logging.error(f"Error while downloading file: {e}")
+            self.display_message(f"Error while downloading file: {e}")
         finally:
             self.close_file_socket()
 
@@ -296,16 +333,24 @@ class Client:
     def receive_messages(self):
         while self.connected:
             try:
-                message = self.sck.recv(4096)
-                try:
-                    decoded_message = message.decode()
-                    if not self.is_control_message(decoded_message):
-                        self.display_message(decoded_message)
-                except UnicodeDecodeError:
-                    self.display_message("Received non-text data.")
+                message = self.sck.recv(4096).decode()
+                logging.info(f"Received message: {message}")
+                self.display_message(message)
+            except UnicodeDecodeError:
+                error_message = "Received non-text data."
+                logging.error(error_message)
+                self.display_message(error_message)
             except Exception as e:
-                logging.error(f"Receive error: {e}")
+                error_message = f"Receive error: {e}"
+                logging.error(error_message)
                 break
+
+
+
+
+
+
+
 
     def is_control_message(self, message):
         if message.isdigit():

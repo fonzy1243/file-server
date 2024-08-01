@@ -12,9 +12,11 @@ class Server:
     def __init__(self, port):
         self.host = "127.0.0.1"
         self.port = port
-        self.file_port = port + 64  # Separate port for file transfers
+        self.file_port = 5001  # Separate port for file transfers
+        self.dir_port = 5002  # Separate port for directory listing
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.file_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.dir_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.clients = []
         self.handles = {}
         self.threads = []
@@ -29,10 +31,13 @@ class Server:
             self.socket.listen()
             self.file_socket.bind((self.host, self.file_port))
             self.file_socket.listen()
-            logging.info(f"Server listening on {self.host}:{self.port} for commands and {self.host}:{self.file_port} for file transfers")
+            self.dir_socket.bind((self.host, self.dir_port))
+            self.dir_socket.listen()
+            logging.info(f"Server listening on {self.host}:{self.port} for commands, {self.host}:{self.file_port} for file transfers, and {self.host}:{self.dir_port} for directory listing")
             self.running = True
 
             threading.Thread(target=self.accept_file_connections, daemon=True).start()
+            threading.Thread(target=self.accept_dir_connections, daemon=True).start()
 
             while self.running:
                 try:
@@ -56,6 +61,29 @@ class Server:
             logging.error(f"Error: Error starting server {e}")
         finally:
             self.shutdown()
+
+
+    def accept_dir_connections(self):
+        while self.running:
+            try:
+                d_socket, d_address = self.dir_socket.accept()
+                logging.info(f"New directory listing connection from {d_address[0]}:{d_address[1]}")
+                d_thread = threading.Thread(target=self.handle_dir_request, args=(d_socket,))
+                d_thread.start()
+            except Exception as e:
+                logging.error(f"Error: {e}")
+
+    def handle_dir_request(self, d_socket: socket.socket):
+        try:
+            msg = d_socket.recv(1024).decode()
+            if msg == "/dir":
+                self.send_directory_list(d_socket)
+        except Exception as e:
+            logging.error(f"Error: {e}")
+        finally:
+            d_socket.close()
+
+
 
     def accept_file_connections(self):
         while self.running:
@@ -133,13 +161,16 @@ class Server:
             filename = msg_parts[1]
             self.receive_file(c_socket, filename)
         elif command == "/dir":
-            self.send_directory_list(c_socket)
+            if c_socket in self.handles:
+                self.send_directory_list(c_socket)
+            else:
+                c_socket.sendall("Error: You must be registered to use this command.".encode())
         elif command == "/leave":
             c_socket.close()
             self.clients.remove(c_socket)
             self.handles.pop(c_socket, None)
         elif command == "/shutdown":
-            if self.handles.get(c_socket) == "ADMIN":  # Replace "admin" with the actual authorized handle
+            if self.handles.get(c_socket) == "ADMIN":  # Replace "admin" to change the actual authorized handle
                 self.broadcast_message("Server is shutting down for maintenance by admin.")
                 threading.Thread(target=self.shutdown).start()
             else:
@@ -182,20 +213,36 @@ class Server:
                         break
                     file.write(data)
             handle = self.handles.get(c_socket, "Unknown")
-            c_socket.sendall(f"File {filename} received from {handle}.".encode())
+            #c_socket.sendall(f"File {filename} received from {handle}.".encode())
         except Exception as e:
             c_socket.sendall(f"Error: {e}".encode())
 
+
     def send_directory_list(self, c_socket: socket.socket):
         try:
+            logging.info("Preparing to send directory listing")
             files = os.listdir(self.server_directory)
             if files:
                 files_list = "Server Directory:\n" + '\n'.join(files)
             else:
                 files_list = "Server Directory:\nNo files found."
             c_socket.sendall(files_list.encode())
+            logging.info(f"Sent directory listing: {files_list}")  # Log as INFO
+        except FileNotFoundError as e:
+            error_message = f"Error: Directory not found: {e}"
+            c_socket.sendall(error_message.encode())
+            logging.error(error_message)
+        except OSError as e:
+            error_message = f"Error: OS error: {e}"
+            c_socket.sendall(error_message.encode())
+            logging.error(error_message)
         except Exception as e:
-            c_socket.sendall(f"Error: {e}".encode())
+            error_message = f"Error sending directory listing: {e}"
+            c_socket.sendall(error_message.encode())
+            logging.error(error_message)
+
+
+
 
     def send_file(self, f_socket: socket.socket, filename: str):
         filepath = os.path.join(self.server_directory, filename)
