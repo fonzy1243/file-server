@@ -4,6 +4,7 @@ import threading
 import os
 import logging
 import shutil
+import time
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -11,7 +12,7 @@ class Server:
     def __init__(self, port):
         self.host = "127.0.0.1"
         self.port = port
-        self.file_port = port + 1  # Separate port for file transfers
+        self.file_port = port + 64  # Separate port for file transfers
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.file_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.clients = []
@@ -65,8 +66,17 @@ class Server:
                 f_thread.start()
             except Exception as e:
                 logging.error(f"Error: {e}")
+                
+
+    def broadcast_message(self, message: str):
+        for client in self.clients:
+            client.sendall(message.encode())
 
     def shutdown(self):
+        for i in range(10, 0, -1):
+            self.broadcast_message(f"Server shutting down in {i} seconds...")
+            time.sleep(1)
+        self.broadcast_message("Server has been shutdown by admin for maintenance.")
         self.shutdown_event.set()
         self.running = False
         for c in self.clients:
@@ -129,8 +139,9 @@ class Server:
             self.clients.remove(c_socket)
             self.handles.pop(c_socket, None)
         elif command == "/shutdown":
-            if c_socket in self.handles:
-                self.shutdown()
+            if self.handles.get(c_socket) == "ADMIN":  # Replace "admin" with the actual authorized handle
+                self.broadcast_message("Server is shutting down for maintenance by admin.")
+                threading.Thread(target=self.shutdown).start()
             else:
                 c_socket.sendall(f"Error: Unauthorized shutdown attempt.".encode())
         elif command == "/unicast" and len(msg_parts) > 2:
