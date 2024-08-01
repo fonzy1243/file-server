@@ -159,7 +159,7 @@ class Client:
             self.display_message("Connection to the Messaging Server is successful!")
             threading.Thread(target=self.receive_messages, daemon=True).start()
         except Exception as e:
-            self.display_message(f"Error: Connection to the Server has failed! Please check IP Address and Port Number.")
+            self.display_message(f"Error: Connection to the Server has failed! Please check IP Address and Port Number.{e}")
             #self.display_message(f"Error: Connection to the Server has failed! Please check IP Address and Port Number. {e}") # Uncomment for detailed error message
             
     def disconnect(self):
