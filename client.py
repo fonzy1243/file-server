@@ -1,3 +1,6 @@
+# ATANACIO, ANJELO PATRICK ASUNCION - S12
+# FERMIN, ALFONSO GABRIELLI TAROY - S12
+# Client side
 import socket
 import os
 import tkinter as tk
@@ -42,7 +45,7 @@ class Client:
 
     def create_ui(self):
         self.root = tk.Tk()
-        self.root.title("Messaging Client")
+        self.root.title("File Exchange System - Messaging Client")
 
         self.output_area = scrolledtext.ScrolledText(self.root, wrap=tk.WORD, width=50, height=20)
         self.output_area.grid(row=0, column=0, columnspan=2, padx=10, pady=10)

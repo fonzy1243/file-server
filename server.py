@@ -1,3 +1,6 @@
+# ATANACIO, ANJELO PATRICK ASUNCION - S12
+# FERMIN, ALFONSO GABRIELLI TAROY - S12
+# Server side
 import socket
 import sys
 import threading
