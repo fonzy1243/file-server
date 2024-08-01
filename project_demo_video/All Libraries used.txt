@@ -1,0 +1,28 @@
+client.py:
+# Standard Libraries (Python 3.x)
+socket
+os
+tkinter
+threading
+queue
+logging
+shutil
+time
+
+# Compatible with Python 3.x
+python==3.8.10
+
+
+#====================================#
+server.py
+# Standard Libraries (Python 3.x)
+socket
+sys
+threading
+os
+logging
+shutil
+time
+
+# Compatible with Python 3.x
+python==3.8.10
